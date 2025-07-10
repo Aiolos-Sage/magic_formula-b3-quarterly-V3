@@ -107,29 +107,59 @@ def get_financial_data(ticker):
         data = response.json()
         income_stmt_q = data.get('Financials', {}).get('Income_Statement', {}).get('quarterly', {})
         balance_sheet_q = data.get('Financials', {}).get('Balance_Sheet', {}).get('quarterly', {})
+        valuation = data.get('Valuation', {})
         if not income_stmt_q or not balance_sheet_q:
-            return None, "No quarterly data"
+            return [], f"No quarterly data for {ticker}"
+
+        results = []
+        debug_msgs = []
         common_dates = sorted(set(income_stmt_q.keys()) & set(balance_sheet_q.keys()), reverse=True)
         for date in common_dates:
-            income_report = income_stmt_q.get(date)
-            balance_sheet_report = balance_sheet_q.get(date)
-            if not income_report or not balance_sheet_report:
+            income_report = income_stmt_q.get(date, {})
+            balance_sheet_report = balance_sheet_q.get(date, {})
+            ebit = income_report.get('ebit')
+            total_debt = balance_sheet_report.get('shortLongTermDebtTotal')
+            total_equity = balance_sheet_report.get('totalStockholderEquity')
+            enterprise_value = valuation.get('EnterpriseValue', 0)
+
+            # Convert to float if possible, else None
+            def to_float(x):
+                try:
+                    return float(x)
+                except (TypeError, ValueError):
+                    return None
+
+            ebit = to_float(ebit)
+            total_debt = to_float(total_debt)
+            total_equity = to_float(total_equity)
+            enterprise_value = to_float(enterprise_value)
+
+            # Check for missing critical fields
+            missing = []
+            if ebit is None:
+                missing.append("ebit")
+            if total_debt is None and total_equity is None:
+                missing.append("debt+equity")
+            if enterprise_value is None:
+                missing.append("enterprise_value")
+
+            if missing:
+                debug_msgs.append(f"{ticker} {date}: missing fields - {', '.join(missing)}")
                 continue
-            ebit_usd = float(income_report.get('ebit') or 0)
-            total_debt_brl = float(balance_sheet_report.get('shortLongTermDebtTotal') or 0)
-            total_equity_brl = float(balance_sheet_report.get('totalStockholderEquity') or 0)
-            enterprise_value_brl = float(data.get('Valuation', {}).get('EnterpriseValue', 0))
-            if ebit_usd != 0 and (total_debt_brl != 0 or total_equity_brl != 0):
-                return {
-                    "report_date": date,
-                    "ebit_usd": ebit_usd,
-                    "enterprise_value_brl": enterprise_value_brl,
-                    "total_debt_brl": total_debt_brl,
-                    "total_equity_brl": total_equity_brl,
-                }, None
-        return None, "No valid report with nonzero EBIT and capital"
+
+            results.append({
+                "report_date": date,
+                "ebit_usd": ebit,
+                "enterprise_value_brl": enterprise_value,
+                "total_debt_brl": total_debt if total_debt is not None else 0,
+                "total_equity_brl": total_equity if total_equity is not None else 0,
+            })
+
+        if not results:
+            return [], "; ".join(debug_msgs) if debug_msgs else "No valid quarterly data found"
+        return results, None
     except Exception as e:
-        return None, f"Error: {str(e)}"
+        return [], f"Error: {str(e)}"
 
 st.set_page_config(layout="wide")
 
@@ -180,24 +210,25 @@ if st.button(LANG_TEXT["run_button"][lang]):
         for i, ticker in enumerate(TICKERS):
             progress_text = f"Fetching data for {ticker} ({i+1}/{len(TICKERS)})"
             progress_bar.progress((i + 1) / len(TICKERS), text=progress_text)
-            financials, err = get_financial_data(ticker)
-            if financials:
-                ebit_brl = financials["ebit_usd"] * rate
-                ey_value = (ebit_brl / financials["enterprise_value_brl"]) * 100 if financials["enterprise_value_brl"] else 0
-                capital_employed_brl = financials["total_debt_brl"] + financials["total_equity_brl"]
-                capital_employed_usd = (capital_employed_brl / rate) if rate else 0
-                roc_value = (financials["ebit_usd"] / capital_employed_usd) * 100 if capital_employed_usd else 0
-                all_results.append({
-                    "Ticker": ticker,
-                    "Report Date": financials["report_date"],
-                    "Earnings Yield": ey_value,
-                    "Return on Capital": roc_value,
-                })
-                all_dates.add(financials["report_date"])
-                if ey_value > 0 and roc_value > 0:
-                    ok.append(ticker)
-                else:
-                    neg.append(ticker)
+            quarter_results, err = get_financial_data(ticker)
+            if quarter_results:
+                for financials in quarter_results:
+                    ebit_brl = financials["ebit_usd"] * rate
+                    ey_value = (ebit_brl / financials["enterprise_value_brl"]) * 100 if financials["enterprise_value_brl"] else 0
+                    capital_employed_brl = financials["total_debt_brl"] + financials["total_equity_brl"]
+                    capital_employed_usd = (capital_employed_brl / rate) if rate else 0
+                    roc_value = (financials["ebit_usd"] / capital_employed_usd) * 100 if capital_employed_usd else 0
+                    all_results.append({
+                        "Ticker": ticker,
+                        "Report Date": financials["report_date"],
+                        "Earnings Yield": ey_value,
+                        "Return on Capital": roc_value,
+                    })
+                    all_dates.add(financials["report_date"])
+                    if ey_value > 0 and roc_value > 0:
+                        ok.append(ticker)
+                    else:
+                        neg.append(ticker)
             else:
                 failed.append(ticker)
             st.session_state.fetch_log.append(f"{ticker}: {err}")

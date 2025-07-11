@@ -4,10 +4,8 @@ import yfinance as yf
 import pandas as pd
 import datetime
 
-# Load API key securely from Streamlit secrets
 API_TOKEN = st.secrets["API_TOKEN"]
 
-# Unique B3 tickers (duplicates removed)
 TICKERS = [
     "PETR4.SA","VALE3.SA","BBAS3.SA","MGLU3.SA","B3SA3.SA","COGN3.SA","ABEV3.SA","BBDC4.SA","ITSA4.SA","AZUL4.SA",
     "VAMO3.SA","ITUB4.SA","RAIZ4.SA","CSAN3.SA","CVCB3.SA","RAIL3.SA","PETR3.SA","PRIO3.SA","BEEF3.SA","CSNA3.SA",
@@ -117,7 +115,6 @@ def get_financial_data(ticker):
             total_equity = balance_sheet_report.get('totalStockholderEquity')
             enterprise_value = valuation.get('EnterpriseValue', 0)
 
-            # Convert to float if possible, else None
             def to_float(x):
                 try:
                     return float(x)
@@ -129,7 +126,6 @@ def get_financial_data(ticker):
             total_equity = to_float(total_equity)
             enterprise_value = to_float(enterprise_value)
 
-            # Check for missing critical fields
             missing = []
             if ebit is None:
                 missing.append("ebit")
@@ -158,7 +154,6 @@ def get_financial_data(ticker):
 
 st.set_page_config(layout="wide")
 
-# Sidebar: Language selection and error messages
 with st.sidebar:
     lang = st.radio("Language / Idioma", options=["en", "pt"], format_func=lambda x: "English" if x == "en" else "Português")
     if st.session_state.error_msgs:
@@ -208,7 +203,6 @@ if st.button(LANG_TEXT["run_button"][lang]):
             quarter_results, err = get_financial_data(ticker)
             if quarter_results:
                 for financials in quarter_results:
-                    # --- Filter: Only accept reports from 2024-01-01 to today ---
                     report_date_obj = pd.to_datetime(financials["report_date"]).date()
                     if not (datetime.date(2024, 1, 1) <= report_date_obj <= datetime.date.today()):
                         continue
@@ -251,26 +245,18 @@ if st.button(LANG_TEXT["run_button"][lang]):
 # --- Display Logic ---
 if st.session_state.results_df is not None and not st.session_state.results_df.empty:
     df = st.session_state.results_df.copy()
-    # --- YTD Date Filter ---
     start_date = datetime.date(2024, 1, 1)
     end_date = datetime.date.today()
     df['Report Date'] = pd.to_datetime(df['Report Date']).dt.date
     df = df[(df['Report Date'] >= start_date) & (df['Report Date'] <= end_date)]
-
-    # --- Keep only the most recent report per ticker ---
     df = df.sort_values(['Ticker', 'Report Date'], ascending=[True, False])
     df = df.drop_duplicates(subset=['Ticker'], keep='first')
-
     df_positive = df[(df["Earnings Yield"] > 0) & (df["Return on Capital"] > 0)].copy()
     df_positive = df_positive.sort_values(by='Magic Rank')
     df_negative = df[~((df["Earnings Yield"] > 0) & (df["Return on Capital"] > 0))].copy()
     df_negative = df_negative.sort_values(by='Weighted Score', ascending=False)
     st.markdown("---")
     st.info(st.session_state.fetch_summary)
-    if st.session_state.fetch_log:
-        with st.expander("Show failed tickers and reasons"):
-            for log in st.session_state.fetch_log:
-                st.write(log)
     st.subheader(LANG_TEXT["table_header"][lang])
     st.markdown(
         f"**{LANG_TEXT['ticker_counter'][lang].format(n=len(df_positive))}**"

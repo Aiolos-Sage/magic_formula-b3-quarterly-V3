@@ -229,9 +229,6 @@ if st.button(LANG_TEXT["run_button"][lang]):
         if all_results:
             df = pd.DataFrame(all_results)
             df['Weighted Score'] = (df['Earnings Yield'] * 1) + (df['Return on Capital'] * 0.33)
-            df['Magic Rank'] = None
-            mask_positive = (df["Earnings Yield"] > 0) & (df["Return on Capital"] > 0)
-            df.loc[mask_positive, 'Magic Rank'] = df.loc[mask_positive, 'Weighted Score'].rank(method='min', ascending=False).astype(int)
             st.session_state.results_df = df
             st.session_state.all_dates = sorted(list(all_dates), reverse=True)
             st.session_state.fetch_summary = LANG_TEXT["fetch_summary"][lang].format(
@@ -251,10 +248,15 @@ if st.session_state.results_df is not None and not st.session_state.results_df.e
     df = df[(df['Report Date'] >= start_date) & (df['Report Date'] <= end_date)]
     df = df.sort_values(['Ticker', 'Report Date'], ascending=[True, False])
     df = df.drop_duplicates(subset=['Ticker'], keep='first')
+
+    # --- Clean, sequential Magic Rank for positive results ---
     df_positive = df[(df["Earnings Yield"] > 0) & (df["Return on Capital"] > 0)].copy()
-    df_positive = df_positive.sort_values(by='Magic Rank')
+    df_positive = df_positive.sort_values(by='Weighted Score', ascending=False).reset_index(drop=True)
+    df_positive['Magic Rank'] = range(1, len(df_positive) + 1)
+
     df_negative = df[~((df["Earnings Yield"] > 0) & (df["Return on Capital"] > 0))].copy()
     df_negative = df_negative.sort_values(by='Weighted Score', ascending=False)
+
     st.markdown("---")
     st.info(st.session_state.fetch_summary)
     st.subheader(LANG_TEXT["table_header"][lang])

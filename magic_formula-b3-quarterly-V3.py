@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import yfinance as yf
 import pandas as pd
+import datetime
 
 # Load API key securely from Streamlit secrets
 API_TOKEN = st.secrets["API_TOKEN"]
@@ -213,6 +214,10 @@ if st.button(LANG_TEXT["run_button"][lang]):
             quarter_results, err = get_financial_data(ticker)
             if quarter_results:
                 for financials in quarter_results:
+                    # --- Filter: Only accept reports from 2024-01-01 to today ---
+                    report_date_obj = pd.to_datetime(financials["report_date"]).date()
+                    if not (datetime.date(2024, 1, 1) <= report_date_obj <= datetime.date.today()):
+                        continue
                     ebit_brl = financials["ebit_usd"] * rate
                     ey_value = (ebit_brl / financials["enterprise_value_brl"]) * 100 if financials["enterprise_value_brl"] else 0
                     capital_employed_brl = financials["total_debt_brl"] + financials["total_equity_brl"]
@@ -252,14 +257,11 @@ if st.button(LANG_TEXT["run_button"][lang]):
 # --- Display Logic ---
 if st.session_state.results_df is not None and not st.session_state.results_df.empty:
     df = st.session_state.results_df.copy()
-    if st.session_state.all_dates:
-        selected_dates = st.multiselect(
-            LANG_TEXT["date_filter"][lang],
-            options=st.session_state.all_dates,
-            default=st.session_state.all_dates
-        )
-        if selected_dates:
-            df = df[df["Report Date"].isin(selected_dates)]
+    # --- YTD Date Filter (redundant, but ensures only YTD is shown if user reloads) ---
+    start_date = datetime.date(2024, 1, 1)
+    end_date = datetime.date.today()
+    df['Report Date'] = pd.to_datetime(df['Report Date']).dt.date
+    df = df[(df['Report Date'] >= start_date) & (df['Report Date'] <= end_date)]
     df_positive = df[(df["Earnings Yield"] > 0) & (df["Return on Capital"] > 0)].copy()
     df_positive = df_positive.sort_values(by='Magic Rank')
     df_negative = df[~((df["Earnings Yield"] > 0) & (df["Return on Capital"] > 0))].copy()
